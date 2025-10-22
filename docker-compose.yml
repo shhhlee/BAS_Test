@@ -1,0 +1,257 @@
+services:
+  pgsql:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: openbas
+    volumes:
+      - pgsqldata:/var/lib/postgresql/data
+    restart: always
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "${POSTGRES_USER}", "-d", "openbas" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:RELEASE.2025-06-13T11-33-47Z
+    volumes:
+      - s3data:/data
+    ports:
+      - "9000:9000"   
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server /data
+    restart: always
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:4.1-management
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_DEFAULT_USER}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_DEFAULT_PASS}
+      - RABBITMQ_NODENAME=rabbit01@localhost
+    volumes:
+      - type: bind
+        source: ./rabbitmq.conf
+        target: /etc/rabbitmq/rabbitmq.conf
+      - amqpdata:/var/lib/rabbitmq
+    restart: always
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "-q", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.4
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    environment:
+      - discovery.type=single-node
+      - xpack.ml.enabled=false
+      - xpack.security.enabled=false     
+      - thread_pool.search.queue_size=5000
+      - logger.org.elasticsearch.discovery="ERROR"
+      - "ES_JAVA_OPTS=-Xms${ELASTIC_MEMORY_SIZE} -Xmx${ELASTIC_MEMORY_SIZE} -XX:+IgnoreUnrecognizedVMOptions -XX:UseSVE=0"
+      - "CLI_JAVA_OPTS=-XX:+IgnoreUnrecognizedVMOptions -XX:UseSVE=0"
+    ports:
+      - "9200:9200"                     
+    restart: always
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile:  { soft: 65536, hard: 65536 }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200 >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 50
+
+
+  openbas:
+    image: openbas/platform:1.18.20
+    environment:
+      - OPENBAS_BASE-URL=${OPENBAS_BASE_URL}
+      - OPENBAS_BASE_URL=${OPENBAS_BASE_URL}
+      - OPENBAS_AUTH-LOCAL-ENABLE=true
+      - OPENBAS_AUTH_LOCAL_ENABLE=true
+      - OPENBAS_ADMIN_EMAIL=${OPENBAS_ADMIN_EMAIL}
+      - OPENBAS_ADMIN_PASSWORD=${OPENBAS_ADMIN_PASSWORD}
+      - OPENBAS_ADMIN_TOKEN=${OPENBAS_ADMIN_TOKEN}
+      - OPENBAS_HEALTHCHECK_KEY=${OPENBAS_HEALTHCHECK_KEY}
+      - OPENBAS_EXTRA-TRUSTED-CERTS-DIR=/opt/openbas/additional_certs
+      - OPENBAS_EXTRA_TRUSTED_CERTS_DIR=/opt/openbas/additional_certs
+
+      # ── PostgreSQL
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://pgsql:5432/openbas
+      - SPRING_DATASOURCE_USERNAME=${POSTGRES_USER}
+      - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD}
+
+      - MINIO_ENDPOINT=minio
+      - MINIO_ACCESS-KEY=${MINIO_ROOT_USER}
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER}
+      - MINIO_ACCESS-SECRET=${MINIO_ROOT_PASSWORD}
+      - MINIO_ACCESS_SECRET=${MINIO_ROOT_PASSWORD}
+
+      # ── RabbitMQ
+      - OPENBAS_RABBITMQ_HOSTNAME=rabbitmq
+      - OPENBAS_RABBITMQ_USER=${RABBITMQ_DEFAULT_USER}
+      - OPENBAS_RABBITMQ_PASS=${RABBITMQ_DEFAULT_PASS}
+
+      # ── Elasticsearch 
+      - ENGINE_URL=http://elasticsearch:9200
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - SPRING_ELASTICSEARCH_URIS=http://elasticsearch:9200
+
+      # ── Spring Mail
+      - SPRING_MAIL_HOST=${SPRING_MAIL_HOST}
+      - SPRING_MAIL_PORT=${SPRING_MAIL_PORT}
+      - SPRING_MAIL_USERNAME=${SPRING_MAIL_USERNAME}
+      - SPRING_MAIL_PASSWORD=${SPRING_MAIL_PASSWORD}
+      - SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH=${SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH}
+      - SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_ENABLE=${SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_ENABLE}
+      - SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_TRUST=*
+      - SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE=${SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE}
+
+      # ── IMAP
+      - OPENBAS_MAIL_IMAP_ENABLED=${OPENBAS_MAIL_IMAP_ENABLED}
+      - OPENBAS_MAIL_IMAP_HOST=${OPENBAS_MAIL_IMAP_HOST}
+      - OPENBAS_MAIL_IMAP_PORT=${OPENBAS_MAIL_IMAP_PORT}
+      - OPENBAS_MAIL_IMAP_USERNAME=${SPRING_MAIL_USERNAME}
+      - OPENBAS_MAIL_IMAP_PASSWORD=${SPRING_MAIL_PASSWORD}
+      - OPENBAS_MAIL_IMAP_AUTH=${OPENBAS_MAIL_IMAP_AUTH}
+      - OPENBAS_MAIL_IMAP_SSL_ENABLE=${OPENBAS_MAIL_IMAP_SSL_ENABLE}
+      - OPENBAS_MAIL_IMAP_SSL_TRUST=*
+      - OPENBAS_MAIL_IMAP_STARTTLS_ENABLE=${OPENBAS_MAIL_IMAP_STARTTLS_ENABLE}
+
+      # ── Caldera 
+      - EXECUTOR_CALDERA_ENABLE=${EXECUTOR_CALDERA_ENABLE:-true}
+      - EXECUTOR_CALDERA_URL=${CALDERA_URL:-http://caldera:8888}
+      - EXECUTOR_CALDERA_PUBLIC_URL=${CALDERA_PUBLIC_URL:-http://localhost:8888}
+      - EXECUTOR_CALDERA_API_KEY=${CALDERA_API_KEY}
+      - INJECTOR_CALDERA_ENABLE=${INJECTOR_CALDERA_ENABLE:-true}
+      - INJECTOR_CALDERA_URL=${CALDERA_URL:-http://caldera:8888}
+      - INJECTOR_CALDERA_PUBLIC_URL=${CALDERA_PUBLIC_URL:-http://localhost:8888}
+      - INJECTOR_CALDERA_API_KEY=${CALDERA_API_KEY}
+
+    ports:
+      - "8080:8080"
+    depends_on:
+      pgsql:         { condition: service_healthy }
+      minio:         { condition: service_healthy }
+      rabbitmq:      { condition: service_healthy }
+      elasticsearch: { condition: service_healthy }
+    restart: always
+    healthcheck:
+      test: [ "CMD", "wget", "-qO-", "http://localhost:8080/api/health?health_access_key=${OPENBAS_HEALTHCHECK_KEY}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+
+  collector-mitre-attack:
+    image: openbas/collector-mitre-attack:1.18.20
+    environment:
+      - OPENBAS_URL=http://openbas:8080
+      - OPENBAS_TOKEN=${OPENBAS_ADMIN_TOKEN}
+      - COLLECTOR_ID=${COLLECTOR_MITRE_ATTACK_ID}
+      - "COLLECTOR_NAME=MITRE ATT&CK"
+      - COLLECTOR_LOG_LEVEL=info
+    depends_on:
+      openbas:
+        condition: service_healthy
+    restart: always
+
+  collector-openbas:
+    image: openbas/collector-openbas:1.18.20
+    environment:
+      - OPENBAS_URL=http://openbas:8080
+      - OPENBAS_TOKEN=${OPENBAS_ADMIN_TOKEN}
+      - COLLECTOR_ID=${COLLECTOR_OPENBAS_ID}
+      - "COLLECTOR_NAME=OpenBAS Datasets"
+      - COLLECTOR_LOG_LEVEL=info
+    depends_on:
+      openbas:
+        condition: service_healthy
+    restart: always
+
+  collector-atomic-red-team:
+    image: openbas/collector-atomic-red-team:1.18.20
+    environment:
+      - OPENBAS_URL=http://openbas:8080
+      - OPENBAS_TOKEN=${OPENBAS_ADMIN_TOKEN}
+      - COLLECTOR_ID=${COLLECTOR_ATOMIC_RED_TEAM_ID}
+      - "COLLECTOR_NAME=Atomic Red Team"
+      - COLLECTOR_LOG_LEVEL=info
+    depends_on:
+      openbas:
+        condition: service_healthy
+    restart: always
+
+  collector-nvd-nist-cve:
+    image: openbas/collector-nvd-nist-cve:prerelease
+    environment:
+      - OPENBAS_URL=http://openbas:8080
+      - OPENBAS_TOKEN=${OPENBAS_ADMIN_TOKEN}
+      - COLLECTOR_ID=${COLLECTOR_NVD_NIST_CVE_ID}
+      - NVD_NIST_CVE_API_KEY=${COLLECTOR_NVD_NIST_CVE_API_KEY}
+      - "COLLECTOR_NAME=CVE by NVD NIST"
+      - COLLECTOR_LOG_LEVEL=info
+    depends_on:
+      openbas:
+        condition: service_healthy
+    restart: always
+
+  injector-nmap:
+    image: openbas/injector-nmap:1.18.20
+    environment:
+      - OPENBAS_URL=http://openbas:8080
+      - OPENBAS_TOKEN=${OPENBAS_ADMIN_TOKEN}
+      - INJECTOR_ID=${INJECTOR_NMAP_ID}
+      - "INJECTOR_NAME=Nmap"
+      - INJECTOR_LOG_LEVEL=info
+    depends_on:
+      openbas:
+        condition: service_healthy
+    restart: always
+
+  injector-nuclei:
+    image: openbas/injector-nuclei:1.18.20
+    environment:
+      - OPENBAS_URL=http://openbas:8080
+      - OPENBAS_TOKEN=${OPENBAS_ADMIN_TOKEN}
+      - INJECTOR_ID=${INJECTOR_NUCLEI_ID}
+      - "INJECTOR_NAME=Nuclei"
+      - INJECTOR_LOG_LEVEL=info
+    depends_on:
+      openbas:
+        condition: service_healthy
+    restart: always
+
+  caldera:
+    image: openbas/caldera-server:5.1.0
+    restart: always
+    ports:
+      - "8888:8888"
+    environment:
+      CALDERA_URL: http://caldera:8888
+    volumes:
+      - type: bind
+        source: ./caldera.yml
+        target: /usr/src/app/conf/local.yml
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8888 >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+volumes:
+  pgsqldata:
+  s3data:
+  amqpdata:
+  esdata:

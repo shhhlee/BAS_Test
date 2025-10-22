@@ -1,0 +1,11 @@
+# docker-compose.caldera-executor.yml
+services:
+  openbas:
+    environment:
+      EXECUTOR_CALDERA_ENABLE: "true"
+      EXECUTOR_CALDERA_URL: "${CALDERA_URL:-http://caldera:8888}"
+      EXECUTOR_CALDERA_PUBLIC-URL: "${CALDERA_PUBLIC_URL:-http://localhost:8888}"
+      EXECUTOR_CALDERA_API-KEY: "${CALDERA_API_KEY:-123e4567-e89b-12d3-a456-426614174000}"
+    depends_on:
+      caldera:
+        condition: service_started
