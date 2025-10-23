@@ -152,7 +152,7 @@ services:
       test: [ "CMD", "wget", "-qO-", "http://localhost:8080/api/health?health_access_key=${OPENBAS_HEALTHCHECK_KEY}" ]
       interval: 10s
       timeout: 5s
-      retries: 20
+      retries: 10
 
 
   collector-mitre-attack:
@@ -197,6 +197,8 @@ services:
   collector-nvd-nist-cve:
     image: openbas/collector-nvd-nist-cve:prerelease
     environment:
+      - OPENAEV_URL=http://openbas:8080
+      - OPENAEV_TOKEN=${OPENBAS_ADMIN_TOKEN}
       - OPENBAS_URL=http://openbas:8080
       - OPENBAS_TOKEN=${OPENBAS_ADMIN_TOKEN}
       - COLLECTOR_ID=${COLLECTOR_NVD_NIST_CVE_ID}
@@ -249,7 +251,7 @@ services:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8888 >/dev/null"]
       interval: 10s
       timeout: 5s
-      retries: 30
+      retries: 10
 volumes:
   pgsqldata:
   s3data:
